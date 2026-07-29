@@ -1,6 +1,6 @@
 authUI <- function(id) {
   ns <- NS(id)
-  bslib::page_center(
+  div(style = "display:flex; justify-content:center; align-items:center; min-height:80vh;",
     bslib::card(
       bslib::card_header("QA Reviewer Login"),
       textInput(ns("email"), "Email", value = "admin@local"),
