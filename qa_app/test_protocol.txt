@@ -1,0 +1,46 @@
+Clinical Study Protocol - Brief Synopsis
+
+Protocol ID: MSC-2026-007       Sponsor: Mascot Therapeutics, Inc.
+
+1. Background and Rationale
+Heart failure with reduced ejection fraction (HFrEF) affects approximately
+6.5 million paitents in the United States. Despite optimal medical therapy,
+mortality remains hgih and quality of life is significantly impaired. This
+study will evaluate the safety and efficacy of MSC-007, a novel oral agent,
+in adult patients with symptomatic HFrEF.
+
+2. Objectives
+Primary: To evaluate the change from baseline in NT-proBNP at Week 12.
+Secondary: To assess functional capacity (6-minute walk distance) and
+patient-reported outcomes.
+
+3. Study Design
+This is a randomised, double-blind, placebo-controlled, parallel-group
+Phase 2 trial. Approximately 240 subjects will be enrolled. Subjects will
+be randomized 1:1 to MSC-007 50 mg once daily or matching placebo. All
+participants will receive standard background therapy. Patients will be
+followed for 14 weeks.
+
+4. Eligibility Criteria
+Inclusion: Adults aged 18-80 with NYHA class II-III HFrEF; LVEF <= 40%;
+on stable guideline-directed medical therapy for at least 3 months.
+Exclusion: eGFR < 30 mL/min/1.73 m^2; acute coronary syndrome within
+30 days; pregnancy; participation in another interventional trial within
+60 days.
+
+5. Statistical Considerations
+The primary analysis will compare the mean change in NT-proBNP between
+treatment groups using an ANCOVA model adjusted for baseline. We expect
+MSC-007 to reduce NT-proBNP by 30%. Statistical significance will be
+declared if p < 0.05.
+
+6. Safety Reporting
+Adverse events will be collected throughout the study. Serious adverse
+events should be reported to the sponsor.
+
+7. Ethics
+This study will be conducted in accordance with the Declaration of
+Helsinki. All patients will provide written informed consent prior to
+study procedures.
+
+Primary endpoint: To evaluate the change from baseline in NT-proBNP at Week 12.

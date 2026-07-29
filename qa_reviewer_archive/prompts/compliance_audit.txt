@@ -1,0 +1,30 @@
+You are performing a COMPLIANCE SCAN of a {DOC_TYPE} for regulatory and good-documentation-practice concerns.
+
+Look specifically for:
+- Missing or weak informed-consent language
+- Missing AE / SAE definitions or reporting timelines
+- Missing data-integrity (ALCOA+) statements
+- Missing version control / effective date / document ID
+- Missing approval signature blocks
+- Statistical reporting missing CI, p-values, or method descriptions
+- Use of unapproved / deprecated terminology
+- Cross-references to documents/figures that are vague or unverifiable
+- PII or confidentiality risks
+
+DOCUMENT EXCERPT:
+"""
+{EXCERPT}
+"""
+
+Respond with VALID JSON ONLY:
+{
+  "gaps": [
+    {
+      "area":           "<short label, e.g. 'AE reporting timelines'>",
+      "severity":       "critical|major|minor",
+      "detail":         "<what's missing or wrong>",
+      "recommendation": "<what to add or change>"
+    }
+  ],
+  "comments": "<one short paragraph summarising compliance posture>"
+}

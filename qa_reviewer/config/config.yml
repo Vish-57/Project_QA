@@ -1,0 +1,59 @@
+# =============================================================================
+# config.yml
+# Default config for the QA Reviewer. Override per-environment by setting
+# R_CONFIG_ACTIVE=<profile>.
+# =============================================================================
+
+default:
+  app:
+    title: "QA Reviewer"
+    host: "127.0.0.1"
+    port: 3838
+
+  ollama:
+    host: "127.0.0.1"
+    port: 11434
+    # Recommended small/fast defaults:
+    #   llama3.2:3b (~2 GB)  qwen2.5:3b (~2 GB)
+    #   phi3.5:3.8b (~2.3 GB)  gemma2:2b (~1.6 GB)
+    default_model: "llama3.2:3b"
+    fallback_models:
+      - "llama3.2:3b"
+      - "qwen2.5:3b"
+      - "phi3.5:3.8b"
+      - "gemma2:2b"
+
+  analysis:
+    chunk_chars: 6000
+    chunk_overlap: 400
+    max_chunks: 40
+    workers: 2
+    temperature: 0.2
+    top_p: 0.9
+    num_ctx: 8192
+    num_predict: 1024
+    timeout_sec: 300
+
+  cache:
+    dir: "cache"
+    ttl_hours: 720
+
+  db:
+    driver: "sqlite"
+    path: "data/qa_reviewer.sqlite"
+
+  auth:
+    bootstrap_admin:
+      email: "admin@local"
+      password: "ChangeMe!2026"
+      display_name: "Administrator"
+
+production:
+  inherits: default
+  app:
+    host: "0.0.0.0"
+  auth:
+    bootstrap_admin:
+      email: "admin@local"
+      password: "MUST_CHANGE_BEFORE_DEPLOY"
+      display_name: "Administrator"

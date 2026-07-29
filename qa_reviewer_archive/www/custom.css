@@ -1,0 +1,75 @@
+/* =========================================================================
+   custom.css - QA Reviewer
+   ========================================================================= */
+
+.brand-title { font-weight: 600; margin-left: 0.4rem; }
+
+.user-chip {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.25rem 0.6rem; border-radius: 999px;
+  background: rgba(0,0,0,0.06);
+}
+.role-pill {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  background: #2C3E50; color: #fff; padding: 1px 6px; border-radius: 4px;
+}
+
+/* ---- Auth screen ---- */
+.auth-screen {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #2C3E50 0%, #18BC9C 100%);
+  z-index: 99999;
+}
+.auth-card {
+  background: #fff; border-radius: 12px; padding: 2rem;
+  width: min(420px, 92vw);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+.auth-title { margin: 0 0 0.25rem; }
+.auth-sub   { color: #6c757d; margin-bottom: 1.25rem; font-size: 0.95rem; }
+.auth-error { color: #c0392b; min-height: 1.25rem; font-size: 0.9rem; }
+.auth-hint  { color: #888; font-size: 0.8rem; margin-top: 0.75rem; }
+.btn-block  { width: 100%; }
+
+/* ---- Run / progress ---- */
+.run-row {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.ollama-ok  { color: #18BC9C; }
+.ollama-bad { color: #c0392b; }
+
+.progress-row { margin-top: 0.75rem; }
+.progress-msg { font-size: 0.85rem; color: #555; margin-top: 0.25rem; }
+
+/* ---- Severity pills ---- */
+.sev-pill {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
+  margin-right: 0.5rem;
+}
+.sev-critical { background: #c0392b; color: #fff; }
+.sev-major    { background: #e67e22; color: #fff; }
+.sev-minor    { background: #3498db; color: #fff; }
+
+.cat-pill, .loc-pill {
+  display: inline-block; padding: 1px 8px; border-radius: 4px;
+  font-size: 0.75rem; background: #ecf0f1; color: #2c3e50;
+  margin-right: 0.4rem;
+}
+.loc-pill { background: #f8f9fa; color: #6c757d; font-style: italic; }
+
+.snippet {
+  background: #fffbea; border-left: 3px solid #f1c40f;
+  padding: 0.5rem 0.75rem; font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.85rem; color: #333;
+}
+
+.empty-state {
+  text-align: center; padding: 3rem 1rem; color: #888;
+}
+.empty-state i { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
+
+/* DataTables tweaks */
+table.dataTable td { vertical-align: top; }

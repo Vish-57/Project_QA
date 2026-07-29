@@ -1,0 +1,50 @@
+You are reviewing one section of a {DOC_TYPE} as a senior QA reviewer.
+
+Section heading: {HEADING}
+Chunk id: {CHUNK_ID}
+
+Identify problems present in the TEXT below. For each problem, return ONE object in the issues array.
+
+ALLOWED CATEGORIES (use EXACTLY one of these strings for "category"):
+- grammar          : grammatical error
+- spelling         : misspelled word
+- formatting       : inconsistent capitalization, numbering, bullet style, units, dates
+- terminology      : incorrect or inconsistent use of a defined / regulated term
+- missing_section  : an expected element appears to be missing within this section
+- inconsistency    : internal contradiction within this chunk
+- statistics       : statistical reporting issue (missing CI, p-value, method, sample size)
+- duplicate        : duplicated sentence/paragraph or near-duplicate restatement
+- compliance       : potential regulatory / GCP / ALCOA+ concern
+- clarity          : ambiguous, unclear, or imprecise wording
+- other            : QA issue that doesn't fit the above
+
+SEVERITY RUBRIC (use EXACTLY one of: "critical", "major", "minor"):
+- critical : regulatory or patient-safety implication, or factually wrong content
+- major    : meaningful issue that a reviewer would require fixed before sign-off
+- minor    : typo, style nit, small inconsistency
+
+RULES:
+- Only flag issues clearly present in the text. Do NOT speculate.
+- If you are not sure, do NOT include the issue.
+- Keep "snippet" short — under 200 characters — quoting the exact problematic text.
+- Be specific in "suggestion": give the corrected wording when possible.
+- If no issues are found, return an empty array.
+
+Respond with VALID JSON ONLY in this exact schema:
+{
+  "chunk_id": "{CHUNK_ID}",
+  "issues": [
+    {
+      "category":    "<one of the allowed categories>",
+      "severity":    "critical|major|minor",
+      "snippet":     "<exact quoted text>",
+      "description": "<1-2 sentence description of the issue>",
+      "suggestion":  "<concrete corrected wording or fix>"
+    }
+  ]
+}
+
+TEXT:
+"""
+{TEXT}
+"""

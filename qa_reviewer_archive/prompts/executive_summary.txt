@@ -1,0 +1,35 @@
+You are writing the EXECUTIVE SUMMARY of a QA review of {DOC_TYPE} "{FILENAME}".
+
+DOCUMENT FACTS
+- Pages: {N_PAGES}
+- Words: {N_WORDS}
+
+DETERMINISTIC SCORE (already computed; do not change)
+- Overall: {SCORE} / 100
+- Risk: {RISK}
+- Critical: {N_CRIT}   Major: {N_MAJOR}   Minor: {N_MINOR}
+
+TOP ISSUES (ranked by severity)
+{TOP_ISSUES}
+
+STRUCTURAL AUDIT (JSON)
+{STRUCTURE}
+
+COMPLIANCE AUDIT (JSON)
+{COMPLIANCE}
+
+TASK:
+Produce an executive summary for a QA lead. Keep it factual, professional, and grounded only in the inputs above. Do NOT invent issues.
+
+Respond with VALID JSON ONLY:
+{
+  "executive_summary": "<3-5 sentence paragraph>",
+  "key_recommendations": [
+    "<concrete recommendation 1>",
+    "<concrete recommendation 2>",
+    "..."
+  ],
+  "missing_information": [
+    "<item the reviewer should fill in before resubmission>"
+  ]
+}

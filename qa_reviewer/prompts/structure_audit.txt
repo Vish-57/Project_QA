@@ -1,0 +1,31 @@
+You are auditing the SECTION STRUCTURE of a {DOC_TYPE}.
+
+DETECTED HEADINGS:
+{HEADINGS}
+
+TASK:
+1. Identify expected sections that are MISSING for this document type.
+2. Identify headings that look mis-ordered or duplicated.
+3. Identify suspicious headings (vague, mis-spelled, non-standard).
+
+Reference expectations:
+- Protocol (ICH-E6): Title page, Synopsis, Background and Rationale, Objectives, Endpoints,
+  Study Design, Eligibility, Treatments, Assessments, Statistical Considerations, Safety
+  Reporting, Ethics, References.
+- CSR (ICH-E3): Title page, Synopsis, Ethics, Investigators, Introduction, Objectives,
+  Investigational Plan, Study Patients, Efficacy Evaluation, Safety Evaluation,
+  Discussion, Conclusions, References, Appendices.
+- SOP: Purpose, Scope, Definitions, Responsibilities, Procedure, References,
+  Revision History, Approvals.
+- SAP: Introduction, Objectives, Study Design, Analysis Populations, Statistical Methods,
+  Handling of Missing Data, Interim Analyses, Sensitivity Analyses.
+
+Respond with VALID JSON ONLY in this schema:
+{
+  "missing_sections": ["..."],
+  "out_of_order_sections": ["..."],
+  "suspicious_headings": [
+    { "heading": "...", "reason": "..." }
+  ],
+  "comments": "<one short paragraph summarising structural fitness>"
+}
