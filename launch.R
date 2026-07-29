@@ -14,4 +14,4 @@ if (length(missing) > 0) {
 }
 
 # Launch the app
-shiny::runApp("qa_reviewer", host = "127.0.0.1", port = 3838, launch.browser = TRUE)
+shiny::runApp("qa_reviewer", host = "127.0.0.1", port = 3862, launch.browser = TRUE)
