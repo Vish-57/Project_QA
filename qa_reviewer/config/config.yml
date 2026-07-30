@@ -16,8 +16,9 @@ default:
     # Recommended small/fast defaults:
     #   llama3.2:3b (~2 GB)  qwen2.5:3b (~2 GB)
     #   phi3.5:3.8b (~2.3 GB)  gemma2:2b (~1.6 GB)
-    default_model: "llama3.2:3b"
+    default_model: "gpt-oss:120b-cloud"
     fallback_models:
+      - "gpt-oss:120b-cloud"
       - "llama3.2:3b"
       - "qwen2.5:3b"
       - "phi3.5:3.8b"
@@ -27,7 +28,7 @@ default:
     chunk_chars: 6000
     chunk_overlap: 400
     max_chunks: 40
-    workers: 2
+    workers: 4
     temperature: 0.2
     top_p: 0.9
     num_ctx: 8192

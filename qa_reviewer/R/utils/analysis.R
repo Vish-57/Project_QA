@@ -36,22 +36,17 @@ clean_json_text <- function(raw) {
 }
 
 escape_ctrl_in_strings <- function(x) {
-  chars <- strsplit(x, "", fixed = TRUE)[[1]]; n <- length(chars); buf <- character(n + 64L); j <- 0L; in_str <- FALSE; esc <- FALSE
-  for (ch in chars) {
-    if (in_str) {
-      if (esc) { j <- j + 1L; buf[j] <- ch; esc <- FALSE; next }
-      if (ch == "\\") { j <- j + 1L; buf[j] <- ch; esc <- TRUE; next }
-      if (ch == "\"") { in_str <- FALSE; j <- j + 1L; buf[j] <- ch; next }
-      if (ch == "\n") { j <- j + 1L; buf[j] <- "\\n"; next }
-      if (ch == "\r") next
-      if (ch == "\t") { j <- j + 1L; buf[j] <- "\\t"; next }
-      j <- j + 1L; buf[j] <- ch
-    } else {
-      if (ch == "\"") in_str <- TRUE
-      j <- j + 1L; buf[j] <- ch
-    }
-  }
-  paste(buf[seq_len(j)], collapse = "")
+  m <- gregexpr('"(?:[^"\\\\]|\\\\.)*"', x, perl = TRUE)
+  matches <- regmatches(x, m)[[1]]
+  if (length(matches) == 0) return(x)
+  replacements <- vapply(matches, function(s) {
+    s <- gsub("\n", "\\n", s, fixed = TRUE)
+    s <- gsub("\r", "", s, fixed = TRUE)
+    s <- gsub("\t", "\\t", s, fixed = TRUE)
+    s
+  }, character(1), USE.NAMES = FALSE)
+  regmatches(x, m) <- list(replacements)
+  x
 }
 
 repair_json_light <- function(x) {
@@ -115,18 +110,18 @@ repair_json_heavy <- function(x) {
 }
 
 close_truncated_json <- function(x) {
-  chars <- strsplit(x, "", fixed = TRUE)[[1]]; in_str <- FALSE; esc <- FALSE; stack <- character(0)
+  in_str <- FALSE; esc <- FALSE; stack <- character(0)
+  chars <- strsplit(x, "", fixed = TRUE)[[1]]
   for (ch in chars) {
-    if (in_str) { if (esc) { esc <- FALSE } else if (ch == "\\") { esc <- TRUE } else if (ch == "\"") in_str <- FALSE }
-    else {
-      if (ch == "\"") in_str <- TRUE
-      else if (ch == "{") stack <- c(stack, "}")
-      else if (ch == "[") stack <- c(stack, "]")
-      else if ((ch == "}" || ch == "]") && length(stack) > 0) stack <- stack[-length(stack)]
-    }
+    if (in_str) { if (esc) esc <- FALSE else if (ch == "\\") esc <- TRUE else if (ch == "\"") in_str <- FALSE }
+    else if (ch == "\"") in_str <- TRUE
+    else if (ch == "{") stack <- c(stack, "}")
+    else if (ch == "[") stack <- c(stack, "]")
+    else if ((ch == "}" || ch == "]") && length(stack) > 0) stack <- stack[-length(stack)]
   }
   if (in_str) x <- paste0(x, "\"")
-  x <- sub("[,:]\\s*$", "", x); x <- sub(",\\s*\"[^\"]*\"\\s*:?\\s*$", "", x)
+  x <- sub("[,:]\\s*$", "", x)
+  x <- sub(",\\s*\"[^\"]*\"\\s*:?\\s*$", "", x)
   if (length(stack) > 0) x <- paste0(x, paste(rev(stack), collapse = ""))
   x
 }
@@ -287,19 +282,37 @@ deterministic_findings <- function(text) {
     if (length(out) >= 60) break
   }
   tl <- tolower(text)
-  cnt <- function(w) { g <- gregexpr(paste0("\\b", w, "\\b"), tl, perl = TRUE)[[1]]; if (length(g) == 1 && g[1] == -1) 0L else length(g) }
-  pairs <- list(c("favour", "favor"), c("colour", "color"), c("analyse", "analyze"), c("organisation", "organization"), c("standardise", "standardize"), c("randomisation", "randomization"), c("centre", "center"), c("litre", "liter"), c("odour", "odor"), c("behaviour", "behavior"), c("fibre", "fiber"), c("grey", "gray"), c("utilise", "utilize"))
-  for (p in pairs) { a <- cnt(p[1]); b <- cnt(p[2]); if (a > 0 && b > 0) out[[length(out) + 1]] <- mk_issue("minor", "inconsistency", "throughout", sprintf("Mixed UK/US spelling: \"%s\" (%dx) and \"%s\" (%dx) both appear.", p[1], a, p[2], b), sprintf("Standardize to one spelling (\"%s\" or \"%s\") throughout.", p[1], p[2])) }
-  for (p in list(c("mins", "minutes"), c("hrs", "hours"), c("sec", "seconds"))) { a <- cnt(p[1]); b <- cnt(p[2]); if (a > 0 && b > 0) out[[length(out) + 1]] <- mk_issue("minor", "terminology", "throughout", sprintf("Inconsistent unit: \"%s\" (%dx) and \"%s\" (%dx) both used.", p[1], a, p[2], b), sprintf("Use one form consistently (prefer \"%s\").", p[2])) }
+  uk_us_variants <- c("favour","favor","colour","color","analyse","analyze","organisation","organization","standardise","standardize","randomisation","randomization","centre","center","litre","liter","odour","odor","behaviour","behavior","fibre","fiber","grey","gray","utilise","utilize","mins","minutes","hrs","hours","sec","seconds")
+  uk_us_pairs <- list(c("favour","favor"),c("colour","color"),c("analyse","analyze"),c("organisation","organization"),c("standardise","standardize"),c("randomisation","randomization"),c("centre","center"),c("litre","liter"),c("odour","odor"),c("behaviour","behavior"),c("fibre","fiber"),c("grey","gray"),c("utilise","utilize"),c("mins","minutes"),c("hrs","hours"),c("sec","seconds"))
+  combined_variants <- paste0("\\b(", paste(uk_us_variants, collapse = "|"), ")\\b")
+  all_m <- gregexpr(combined_variants, tl, perl = TRUE)[[1]]
+  if (all_m[1] != -1) {
+    found <- regmatches(tl, list(all_m))[[1]]
+    cnt_tbl <- table(found)
+    for (p in uk_us_pairs) {
+      a <- cnt_tbl[p[1]] %||% 0L; b <- cnt_tbl[p[2]] %||% 0L
+      if (a > 0 && b > 0) {
+        cat_label <- if (p[1] %in% c("mins","hrs","sec")) "terminology" else "inconsistency"
+        msg <- if (cat_label == "terminology") sprintf("Inconsistent unit: \"%s\" (%dx) and \"%s\" (%dx) both used.", p[1], a, p[2], b) else sprintf("Mixed UK/US spelling: \"%s\" (%dx) and \"%s\" (%dx) both appear.", p[1], a, p[2], b)
+        fix <- if (cat_label == "terminology") sprintf("Use one form consistently (prefer \"%s\").", p[2]) else sprintf("Standardize to one spelling (\"%s\" or \"%s\") throughout.", p[1], p[2])
+        out[[length(out) + 1]] <- mk_issue("minor", cat_label, "throughout", msg, fix)
+      }
+    }
+  }
   typos <- c(impovement = "improvement", improvment = "improvement", imporvement = "improvement", impovment = "improvement", telephoic = "telephonic", comittee = "committee", commitee = "committee", committe = "committee", appendice = "appendices", amendmentsto = "amendments to", paitents = "patients", patinets = "patients", intitation = "initiation", photograpy = "photography", photograhy = "photography", balneatherapy = "balneotherapy", occurance = "occurrence", recieve = "receive", seperate = "separate", seperately = "separately", `aged betwen` = "aged between", witney = "Whitney", whitny = "Whitney", signficant = "significant", significanct = "significant", statisical = "statistical", statistcal = "statistical", evalaution = "evaluation", evalution = "evaluation", assesment = "assessment", asessment = "assessment", measurment = "measurement", mesurement = "measurement", tempreture = "temperature", temparature = "temperature", critera = "criteria", critieria = "criteria", protocal = "protocol", particpant = "participant", particpants = "participants", volunter = "volunteer", volunters = "volunteers", sponser = "sponsor", hygeine = "hygiene", erythama = "erythema", erythmea = "erythema")
-  for (bad in names(typos)) {
-    pat <- paste0("\\b", gsub(" ", "\\\\s+", bad), "\\b")
-    for (li in seq_along(lines)) {
-      ln <- lines[li]; hit <- regmatches(ln, regexpr(pat, ln, ignore.case = TRUE, perl = TRUE))
-      if (length(hit) == 0 || !nzchar(hit[1])) next
-      if (identical(tolower(trimws(hit[1])), tolower(trimws(typos[[bad]])))) next
-      out[[length(out) + 1]] <- mk_issue("major", "spelling", sprintf("text (\"%s...\")", substr(trimws(ln), 1, 40)), sprintf("Misspelling: \"%s\" should be \"%s\".", hit[1], typos[[bad]]), sprintf("Correct \"%s\" to \"%s\".", hit[1], typos[[bad]]), hit[1], typos[[bad]])
-      break
+  typo_pats <- vapply(names(typos), function(bad) paste0("\\b", gsub(" ", "\\\\s+", bad), "\\b"), character(1))
+  combined_typo <- paste0("(", paste(typo_pats, collapse = "|"), ")")
+  typo_bad_names <- names(typos)
+  for (li in seq_along(lines)) {
+    ln <- lines[li]
+    hit <- regmatches(ln, regexpr(combined_typo, ln, ignore.case = TRUE, perl = TRUE))
+    if (length(hit) == 0 || !nzchar(hit[1])) next
+    for (bad in typo_bad_names) {
+      if (grepl(paste0("^", typo_pats[bad], "$"), hit[1], ignore.case = TRUE, perl = TRUE)) {
+        if (identical(tolower(trimws(hit[1])), tolower(trimws(typos[[bad]])))) break
+        out[[length(out) + 1]] <- mk_issue("major", "spelling", sprintf("text (\"%s...\")", substr(trimws(ln), 1, 40)), sprintf("Misspelling: \"%s\" should be \"%s\".", hit[1], typos[[bad]]), sprintf("Correct \"%s\" to \"%s\".", hit[1], typos[[bad]]), hit[1], typos[[bad]])
+        break
+      }
     }
   }
   seen_ds <- character(0)
@@ -357,12 +370,22 @@ ollama_verify_numbers <- function(chunk, model, config, timeout_sec = 600) {
 numeric_verification_pass <- function(text, model, config, progress = function(msg) invisible(NULL)) {
   chunks <- build_table_contexts(text)
   if (length(chunks) == 0) return(empty_issues())
-  acc <- list()
-  for (i in seq_along(chunks)) {
-    progress(sprintf("Verifying figures against tables (%d/%d) ...", i, length(chunks)))
+  N <- length(chunks)
+  workers <- min(config$analysis$workers %||% 2L, N)
+  one_verify <- function(i) {
+    if (is.function(progress)) progress(sprintf("Verifying figures against tables (%d/%d) ...", i, N))
     r <- tryCatch(ollama_verify_numbers(chunks[[i]], model, config), error = function(e) NULL)
-    if (!is.null(r) && NROW(r) > 0) acc[[length(acc) + 1]] <- r
+    if (!is.null(r) && NROW(r) > 0) r else NULL
   }
+  results <- if (workers <= 1L) {
+    lapply(seq_len(N), one_verify)
+  } else {
+    ok <- tryCatch({ future::plan(future::multisession, workers = workers); TRUE }, error = function(e) FALSE)
+    on.exit(future::plan(future::sequential), add = TRUE)
+    if (ok) future.apply::future_lapply(seq_len(N), one_verify, future.seed = TRUE, future.packages = c("httr2", "jsonlite"))
+    else lapply(seq_len(N), one_verify)
+  }
+  acc <- Filter(Negate(is.null), results)
   if (length(acc) == 0) return(empty_issues())
   dedupe_issues(do.call(rbind, acc))
 }
@@ -457,7 +480,7 @@ assign_pages <- function(issues, text, page_texts = NULL, toc_map = NULL) {
   norm <- function(s) tolower(gsub("\\s+", " ", trimws(s %||% "")))
   pages_norm <- if (!is.null(page_texts) && length(page_texts) > 0) vapply(page_texts, norm, character(1)) else NULL
   toc_like <- if (!is.null(pages_norm)) { has_dots <- vapply(page_texts, function(t) { m <- gregexpr("[.]{4,}", t)[[1]]; (m[1] != -1) && length(m) >= 3 }, logical(1)); grepl("table of contents", pages_norm, fixed = TRUE) | has_dots } else logical(0)
-  locate <- function(needle, minlen = 4L) { k <- norm(needle); if (nchar(k) < minlen) return(NA_integer_); matches <- which(vapply(pages_norm, function(p) isTRUE(grepl(k, p, fixed = TRUE)), logical(1))); if (!length(matches)) return(NA_integer_); body <- matches[!toc_like[matches]]; if (length(body)) body[1] else matches[1] }
+  locate <- function(needle, minlen = 4L) { k <- norm(needle); if (nchar(k) < minlen) return(NA_integer_); matches <- which(grepl(k, pages_norm, fixed = TRUE)); if (!length(matches)) return(NA_integer_); body <- matches[!toc_like[matches]]; if (length(body)) body[1] else matches[1] }
   q_chars <- "['\"‘’“\"]"
   quoted <- function(s) { if (!nzchar(s %||% "")) return(character(0)); m <- regmatches(s, gregexpr(paste0(q_chars, "([^'\"‘’“\"]{4,80})", q_chars), s, perl = TRUE))[[1]]; m <- gsub(paste0("^", q_chars, "|", q_chars, "$"), "", m, perl = TRUE); unique(trimws(m)) }
   toc <- if (!is.null(toc_map) && NROW(toc_map) > 0) toc_map else parse_toc_pages(text)
@@ -485,11 +508,27 @@ assign_pages <- function(issues, text, page_texts = NULL, toc_map = NULL) {
 run_audit <- function(text, model, config, doc_type, custom_guidelines = "", fast = FALSE, deep = FALSE, page_texts = NULL, toc_map = NULL, verify_numbers = TRUE, progress = function(msg) invisible(NULL)) {
   t0 <- Sys.time(); repaired <- FALSE
   if (isTRUE(deep) && !isTRUE(fast)) {
-    chunks <- split_into_sections(text); issue_sets <- list(); missing_all <- character(0); exec_sum <- ""
-    for (ci in seq_along(chunks)) {
-      progress(sprintf("Deep scan: section %d of %d ...", ci, length(chunks)))
-      r <- tryCatch(ollama_review(chunks[[ci]], model, config, doc_type, custom_guidelines = custom_guidelines, fast = TRUE), error = function(e) NULL)
-      if (!is.null(r) && isTRUE(r$ok)) { if (NROW(r$data$issues) > 0) issue_sets[[length(issue_sets) + 1]] <- r$data$issues; if (isTRUE(r$repaired)) repaired <- TRUE }
+    chunks <- split_into_sections(text)
+    N <- length(chunks)
+    workers <- min(config$analysis$workers %||% 2L, N)
+    one_section <- function(ci) {
+      if (is.function(progress)) progress(sprintf("Deep scan: section %d of %d ...", ci, N))
+      tryCatch(ollama_review(chunks[[ci]], model, config, doc_type, custom_guidelines = custom_guidelines, fast = TRUE), error = function(e) NULL)
+    }
+    section_results <- if (workers <= 1L) {
+      lapply(seq_len(N), one_section)
+    } else {
+      ok <- tryCatch({ future::plan(future::multisession, workers = workers); TRUE }, error = function(e) FALSE)
+      on.exit(future::plan(future::sequential), add = TRUE)
+      if (ok) future.apply::future_lapply(seq_len(N), one_section, future.seed = TRUE, future.packages = c("httr2", "jsonlite"))
+      else lapply(seq_len(N), one_section)
+    }
+    issue_sets <- list(); missing_all <- character(0); exec_sum <- ""
+    for (r in section_results) {
+      if (!is.null(r) && isTRUE(r$ok)) {
+        if (NROW(r$data$issues) > 0) issue_sets[[length(issue_sets) + 1]] <- r$data$issues
+        if (isTRUE(r$repaired)) repaired <- TRUE
+      }
     }
     progress("Deep scan: whole-document consistency pass ...")
     whole <- tryCatch(ollama_review(text, model, config, doc_type, custom_guidelines = custom_guidelines, fast = fast), error = function(e) NULL)
@@ -631,14 +670,17 @@ llm_options <- function(config, low_temp = FALSE) {
 
 build_corrected_docx <- function(src_path, fixes) {
   doc <- officer::read_docx(src_path)
-  count_occ <- function(d, s) { if (!nzchar(s)) return(0L); txt <- paste(officer::docx_summary(d)$text, collapse = "\n"); sum(lengths(regmatches(txt, gregexpr(s, txt, fixed = TRUE)))) }
+  full_text <- paste(officer::docx_summary(doc)$text, collapse = "\n")
   applied <- list(); failed <- list()
   for (f in fixes) {
     old <- f$original_text %||% ""; new <- f$corrected_text %||% ""
     if (!nzchar(old)) { failed[[length(failed) + 1]] <- f; next }
-    before_n <- count_occ(doc, old); ok <- FALSE
-    if (before_n > 0) { doc <- tryCatch(officer::body_replace_all_text(doc, old_value = old, new_value = new, only_at_cursor = FALSE, warn = FALSE, fixed = TRUE), error = function(e) doc); ok <- count_occ(doc, old) < before_n }
-    if (ok) applied[[length(applied) + 1]] <- f else failed[[length(failed) + 1]] <- f
+    has_old <- grepl(old, full_text, fixed = TRUE)
+    if (has_old) {
+      doc <- tryCatch(officer::body_replace_all_text(doc, old_value = old, new_value = new, only_at_cursor = FALSE, warn = FALSE, fixed = TRUE), error = function(e) doc)
+      full_text <- gsub(old, new, full_text, fixed = TRUE)
+    }
+    if (has_old) applied[[length(applied) + 1]] <- f else failed[[length(failed) + 1]] <- f
   }
   add_par <- function(d, txt, style = NULL) { if (!is.null(style)) { out <- tryCatch(officer::body_add_par(d, txt, style = style), error = function(e) NULL); if (!is.null(out)) return(out) }; tryCatch(officer::body_add_par(d, txt), error = function(e) d) }
   doc <- tryCatch(officer::body_add_break(doc), error = function(e) doc)

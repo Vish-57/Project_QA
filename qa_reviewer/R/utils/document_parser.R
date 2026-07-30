@@ -1,3 +1,19 @@
+.docx_xml_cache <- new.env(parent = emptyenv())
+
+get_docx_xml <- function(path) {
+  key <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  if (!is.null(.docx_xml_cache[[key]])) return(.docx_xml_cache[[key]])
+  con <- tryCatch(unz(path, "word/document.xml", open = "rb"), error = function(e) NULL)
+  if (is.null(con)) return(NULL)
+  raw <- tryCatch(readBin(con, "raw", n = 8e7), error = function(e) NULL)
+  try(close(con), silent = TRUE)
+  if (is.null(raw) || length(raw) == 0) return(NULL)
+  xml <- tryCatch({ x <- rawToChar(raw); Encoding(x) <- "UTF-8"; x }, error = function(e) NULL)
+  if (is.null(xml)) return(NULL)
+  .docx_xml_cache[[key]] <- xml
+  xml
+}
+
 parse_document <- function(path) {
   if (!file.exists(path)) return(list(ok = FALSE, error = paste("File not found:", path)))
   ext <- tolower(tools::file_ext(path))
@@ -13,7 +29,7 @@ parse_document <- function(path) {
   res$filename <- basename(path)
   res$ext      <- ext
   res$n_chars  <- nchar(res$text)
-  res$n_words  <- length(strsplit(res$text, "\\s+")[[1]])
+  res$n_words  <- max(0L, { m <- gregexpr("\\S+", res$text, perl = TRUE)[[1]]; if (m[1] == -1) 0L else length(m) })
   res$sections <- detect_sections(res$text)
   res$ok       <- TRUE
   res
@@ -95,12 +111,7 @@ detect_sections <- function(text) {
 }
 
 docx_paragraph_texts <- function(path) {
-  con <- tryCatch(unz(path, "word/document.xml", open = "rb"), error = function(e) NULL)
-  if (is.null(con)) return(character(0))
-  raw <- tryCatch(readBin(con, "raw", n = 8e7), error = function(e) NULL)
-  try(close(con), silent = TRUE)
-  if (is.null(raw) || length(raw) == 0) return(character(0))
-  xml <- tryCatch({ x <- rawToChar(raw); Encoding(x) <- "UTF-8"; x }, error = function(e) NULL)
+  xml <- get_docx_xml(path)
   if (is.null(xml) || !nzchar(xml)) return(character(0))
   xml <- gsub("(?s)<w:instrText[^>]*>.*?</w:instrText>", "", xml, perl = TRUE)
   xml <- gsub("(?s)<w:delText[^>]*>.*?</w:delText>", "", xml, perl = TRUE)
@@ -116,12 +127,7 @@ docx_paragraph_texts <- function(path) {
 }
 
 docx_structured_text <- function(path) {
-  con <- tryCatch(unz(path, "word/document.xml", open = "rb"), error = function(e) NULL)
-  if (is.null(con)) return("")
-  raw <- tryCatch(readBin(con, "raw", n = 8e7), error = function(e) NULL)
-  try(close(con), silent = TRUE)
-  if (is.null(raw) || length(raw) == 0) return("")
-  xml <- tryCatch({ x <- rawToChar(raw); Encoding(x) <- "UTF-8"; x }, error = function(e) NULL)
+  xml <- get_docx_xml(path)
   if (is.null(xml) || !nzchar(xml)) return("")
   xml <- gsub("(?s)<w:instrText[^>]*>.*?</w:instrText>", "", xml, perl = TRUE)
   xml <- gsub("(?s)<w:delText[^>]*>.*?</w:delText>", "", xml, perl = TRUE)

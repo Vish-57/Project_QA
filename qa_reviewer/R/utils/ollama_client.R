@@ -46,7 +46,6 @@ ollama_generate <- function(prompt, model, config, system = NULL, options = list
     httr2::req_method("POST") |>
     httr2::req_body_json(body, auto_unbox = TRUE) |>
     httr2::req_timeout(timeout_sec) |>
-    httr2::req_retry(max_tries = 2, backoff = function(i) 2 ^ i) |>
     httr2::req_perform()
   parsed <- httr2::resp_body_json(resp)
   list(

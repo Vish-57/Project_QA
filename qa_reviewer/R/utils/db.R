@@ -49,8 +49,10 @@ db_insert_issues <- function(con, review_id, issues_df) {
   if (!nrow(issues_df)) return(invisible(NULL))
   issues_df$review_id <- review_id
   cols <- c("review_id", "category", "severity", "location", "snippet", "description", "suggestion")
-  for (c in cols) if (is.null(issues_df[[c]])) issues_df[[c]] <- NA
-  DBI::dbWriteTable(con, "issues", issues_df[, cols, drop = FALSE], append = TRUE, row.names = FALSE)
+  for (c in cols) if (is.null(issues_df[[c]])) issues_df[[c]] <- NA_character_
+  sub <- issues_df[, cols, drop = FALSE]
+  sub$review_id <- as.integer(sub$review_id)
+  DBI::dbAppendTable(con, "issues", sub, row.names = FALSE)
 }
 
 db_issues_for_review <- function(con, review_id) {

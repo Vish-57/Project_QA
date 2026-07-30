@@ -29,7 +29,8 @@ uploadServer <- function(id, config) {
           tm <- tryCatch(parse_toc_pages(paste(docx_paragraph_texts(f$datapath), collapse = "\n")), error = function(e) NULL)
           toc_map(tm); pdf_pages(NULL)
         } else { orig_docx_path(NULL); orig_docx_name(NULL); toc_map(NULL); if (ext == "pdf") { pp <- tryCatch(pdftools::pdf_text(f$datapath), error = function(e) NULL); pdf_pages(pp) } else { pdf_pages(NULL) } }
-        file_info(list(name = f$name, ext = ext, n_chars = nchar(txt), n_words = length(strsplit(txt, "\\s+")[[1]])))
+        n_words <- max(0L, { m <- gregexpr("\\S+", txt, perl = TRUE)[[1]]; if (m[1] == -1) 0L else length(m) })
+        file_info(list(name = f$name, ext = ext, n_chars = nchar(txt), n_words = n_words))
       }
     })
     output$file_info <- renderUI({

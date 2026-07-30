@@ -41,7 +41,7 @@ ui <- fluidPage(
   ),
   div(class = "brand-header",
     div(
-      div(class = "brand-title", icon("shield-check", style = "margin-right:8px;"), "QA Reviewer"),
+      div(class = "brand-title", icon("check-square", style = "margin-right:8px;"), "QA Reviewer"),
       div(class = "brand-sub", "Mascot Spincontrol — AI-Powered Document Quality Assurance")
     ),
     uiOutput("user_chip")
@@ -171,7 +171,7 @@ server <- function(input, output, session) {
 
   output$model_ui <- renderUI({
     m <- models()
-    preferred <- c("llama3.2:3b", "qwen2.5:3b", "phi3.5:3.8b", "gemma2:2b")
+    preferred <- c("gpt-oss:120b-cloud", "llama3.2:3b", "qwen2.5:3b", "phi3.5:3.8b", "gemma2:2b")
     default <- intersect(preferred, m)[1]
     if (is.na(default)) default <- m[1]
     selectInput("model", "Model", choices = if (length(m)) m else "(no models installed)", selected = default)
@@ -201,7 +201,7 @@ server <- function(input, output, session) {
       doc_text(txt); analysis(NULL)
       if (ext == "docx") { orig_docx_path(f$datapath); orig_docx_name(f$name); tm <- tryCatch(parse_toc_pages(paste(docx_paragraph_texts(f$datapath), collapse = "\n")), error = function(e) NULL); toc_map(tm); pdf_pages(NULL) }
       else { orig_docx_path(NULL); orig_docx_name(NULL); toc_map(NULL); if (ext == "pdf") { pp <- tryCatch(pdftools::pdf_text(f$datapath), error = function(e) NULL); pdf_pages(pp) } else { pdf_pages(NULL) } }
-      showNotification(sprintf("Loaded '%s' (%s chars)", f$name, format(nchar(txt), big.mark = ",")), type = "message")
+      showNotification(sprintf("Loaded '%s' (%s chars, %s words)", f$name, format(nchar(txt), big.mark = ","), format(max(0L, { m <- gregexpr("\\S+", txt, perl = TRUE)[[1]]; if (m[1] == -1) 0L else length(m) }), big.mark = ",")), type = "message")
     }
   })
 
@@ -242,7 +242,11 @@ server <- function(input, output, session) {
 
     later::later(function() {
       tryCatch({
-        res <- tryCatch(run_audit(.text, .model, APP_CONFIG, .doctype, custom_guidelines = .remarks, page_texts = .pdf_pages, toc_map = .toc_map, progress = function(msg) message(msg)), error = function(e) { showNotification(paste("Analysis failed:", conditionMessage(e)), type = "error", duration = 12); NULL })
+        res <- tryCatch({
+          r <- run_audit(.text, .model, APP_CONFIG, .doctype, custom_guidelines = .remarks, page_texts = .pdf_pages, toc_map = .toc_map, progress = function(msg) message(msg))
+          if (!is.null(r) && isTRUE(r$ok)) r$data$model <- .model
+          r
+        }, error = function(e) { showNotification(paste("Analysis failed:", conditionMessage(e)), type = "error", duration = 12); NULL })
         if (!is.null(res) && isTRUE(res$ok)) {
           # Save results to DB
           if (!is.null(review_id)) {
@@ -285,6 +289,8 @@ server <- function(input, output, session) {
     n_major <- sum(tolower(d$issues$severity) == "major", na.rm = TRUE)
     n_minor <- sum(tolower(d$issues$severity) == "minor", na.rm = TRUE)
 
+    model_label <- d$model %||% ""
+    dur_label <- if (length(a$elapsed_s) && is.numeric(a$elapsed_s) && a$elapsed_s > 0) sprintf("%.0f sec", a$elapsed_s) else ""
     tagList(
       div(class = "card",
         div(class = "card-header", icon("gauge-high"), " Score Overview"),
@@ -293,6 +299,10 @@ server <- function(input, output, session) {
           column(3, div(class = "stat-box", div(class = paste0("risk-badge risk-", risk), risk), div(class = "stat-label", style = "margin-top:8px;", "Risk Level"))),
           column(3, div(class = "stat-box", div(class = "stat-value", n_crit), div(class = "stat-label", "Critical"))),
           column(3, div(class = "stat-box", div(class = "stat-value", n_major), div(class = "stat-label", "Major")))
+        ),
+        if (nzchar(model_label) || nzchar(dur_label)) div(style = "margin-top:8px; font-size:0.8rem; color:#64748b; display:flex; gap:16px;",
+          if (nzchar(model_label)) span(icon("cube"), sprintf(" Model: %s", model_label)),
+          if (nzchar(dur_label)) span(icon("clock"), sprintf(" Duration: %s", dur_label))
         )
       ),
       if (nzchar(d$executive_summary %||% "")) div(class = "card",
@@ -345,7 +355,13 @@ server <- function(input, output, session) {
     history_trigger()
     df <- db_list_reviews(DB, limit = 200)
     if (nrow(df) == 0) return(DT::datatable(data.frame(Message = "No reviews yet."), options = list(dom = "t")))
-    show <- data.frame(ID = df$id, File = df$filename, Type = df$doc_type, Model = df$model, Score = df$overall_score, Risk = df$risk_level, Issues = df$n_critical + df$n_major + df$n_minor, Date = df$started_at, stringsAsFactors = FALSE)
+    dur <- if (is.numeric(df$duration_s)) sprintf("%.0fs", df$duration_s) else "-"
+    show <- data.frame(
+      ID = df$id, File = df$filename, Type = df$doc_type, Model = df$model,
+      Score = df$overall_score, Risk = df$risk_level,
+      Issues = (df$n_critical %||% 0) + (df$n_major %||% 0) + (df$n_minor %||% 0),
+      Duration = dur, Date = df$started_at, stringsAsFactors = FALSE
+    )
     DT::datatable(show, selection = "single", options = list(pageLength = 10, dom = "ftip"), rownames = FALSE)
   })
 
@@ -356,8 +372,13 @@ server <- function(input, output, session) {
     if (nrow(review) > 0) {
       analysis(list(ok = TRUE, data = list(
         overall_score = review$overall_score, risk_level = review$risk_level,
-        executive_summary = "", issues = issues, missing_information = list()
-      )))
+        executive_summary = review$executive_summary %||% "",
+        issues = issues, missing_information = list(),
+        model = review$model %||% "", duration_s = review$duration_s %||% 0,
+        started_at = review$started_at %||% "",
+        n_critical = review$n_critical %||% 0, n_major = review$n_major %||% 0, n_minor = review$n_minor %||% 0
+      ), elapsed_s = review$duration_s %||% 0))
+      updateTabsetPanel(session, "main_tab", selected = "Review")
       showNotification("Review loaded from history.", type = "message")
     }
   })
