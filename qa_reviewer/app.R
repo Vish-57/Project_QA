@@ -118,6 +118,9 @@ server <- function(input, output, session) {
             uiOutput("insights_ui")
           )
         ),
+        tabPanel(icon("comments"), " Feedback & Learning",
+          div(id = "feedback_container")
+        ),
         tabPanel(icon("clipboard-list"), " Audit Guidelines",
           div(class = "card",
             div(class = "card-header", icon("clipboard-check"), " Custom Audit Guidelines"),
@@ -136,7 +139,7 @@ server <- function(input, output, session) {
             div(class = "card-header", icon("wrench"), " Configuration"),
             h5("Ollama Status"), uiOutput("ollama_status"), hr(),
             h5("Cache"), actionButton("clear_cache", "Clear Cache", class = "btn-warning btn-sm"), hr(),
-            p("QA Reviewer v2.0", style = "color:#94a3b8; font-size:0.85rem;")
+            p("QA Reviewer v2.1 - Now with Self-Learning!", style = "color:#94a3b8; font-size:0.85rem;")
           )
         )
       ),
@@ -538,6 +541,16 @@ server <- function(input, output, session) {
         )
       )
     )
+  })
+
+  # --- Feedback & Learning Module ---
+  # Source the feedback module and initialize it
+  source("R/modules/mod_feedback.R", local = TRUE)
+  mod_feedback_server("feedback", DB)
+  
+  # Render the feedback UI in the dedicated container
+  output$feedback_container <- renderUI({
+    mod_feedback_ui("feedback")
   })
 }
 
