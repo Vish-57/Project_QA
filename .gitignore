@@ -1,7 +1,18 @@
-```
-# R-specific ignores
-*.Rproj.user/
+# R
+.Rproj.user/
 .Rhistory
 .RData
 .Ruserdata/
-```
+
+# LLM response cache (regenerated at runtime)
+qa_reviewer/cache/
+qa_app/cache/
+
+# SQLite databases and WAL/journal files (runtime data)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Scratch/test outputs
+test_output.txt
