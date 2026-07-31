@@ -1,0 +1,7 @@
+```
+# R-specific ignores
+*.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata/
+```

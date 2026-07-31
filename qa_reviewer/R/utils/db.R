@@ -80,3 +80,113 @@ db_save_setting <- function(con, key, value) {
 db_audit <- function(con, user_email, action, target = NULL, meta = NULL) {
   tryCatch(DBI::dbExecute(con, "INSERT INTO audit_log (user_email, action, target, meta, ts) VALUES (?, ?, ?, ?, ?)", params = list(user_email %||% "anonymous", action, target %||% NA, if (is.null(meta)) NA else jsonlite::toJSON(meta, auto_unbox = TRUE), format(Sys.time(), "%Y-%m-%d %H:%M:%S"))), error = function(e) message("audit failed: ", conditionMessage(e)))
 }
+
+# NEW: Save user feedback on an issue (accept/reject/modify)
+db_save_feedback <- function(con, issue_id, review_id, user_email, user_action, 
+                             original_finding_json = NULL, corrected_finding = NULL, 
+                             comment = NULL) {
+  tryCatch({
+    DBI::dbExecute(con, 
+      "INSERT INTO qa_feedback (issue_id, review_id, user_email, user_action, original_finding_json, user_corrected_finding, user_comment, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      params = list(
+        as.integer(issue_id), 
+        as.integer(review_id), 
+        user_email %||% "anonymous",
+        user_action,  # 'accepted', 'rejected', 'modified'
+        original_finding_json %||% NA_character_,
+        corrected_finding %||% NA_character_,
+        comment %||% NA_character_,
+        format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+      )
+    )
+  }, error = function(e) message("feedback save failed: ", conditionMessage(e)))
+  invisible(NULL)
+}
+
+# NEW: Get feedback statistics for a review
+db_get_feedback_stats <- function(con, review_id) {
+  DBI::dbGetQuery(con, 
+    "SELECT user_action, COUNT(*) as count 
+     FROM qa_feedback 
+     WHERE review_id = ? 
+     GROUP BY user_action",
+    params = list(as.integer(review_id))
+  )
+}
+
+# NEW: Learn from aggregated feedback patterns
+db_learn_pattern <- function(con, pattern_type, pattern_key, pattern_value, 
+                             confidence_adjustment = 0.1) {
+  tryCatch({
+    # Check if pattern exists
+    existing <- DBI::dbGetQuery(con, 
+      "SELECT id, occurrence_count, confidence_score 
+       FROM qa_learned_patterns 
+       WHERE pattern_type = ? AND pattern_key = ?",
+      params = list(pattern_type, pattern_key)
+    )
+    
+    if (nrow(existing) > 0) {
+      # Update existing pattern
+      new_count <- existing$occurrence_count[1] + 1
+      new_confidence <- min(1.0, existing$confidence_score[1] + confidence_adjustment)
+      
+      DBI::dbExecute(con,
+        "UPDATE qa_learned_patterns 
+         SET occurrence_count = ?, confidence_score = ?, pattern_value = ?, last_updated = ?
+         WHERE pattern_type = ? AND pattern_key = ?",
+        params = list(
+          new_count, new_confidence, pattern_value, 
+          format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+          pattern_type, pattern_key
+        )
+      )
+    } else {
+      # Insert new pattern
+      DBI::dbExecute(con,
+        "INSERT INTO qa_learned_patterns (pattern_type, pattern_key, pattern_value, confidence_score, occurrence_count, last_updated)
+         VALUES (?, ?, ?, ?, 1, ?)",
+        params = list(
+          pattern_type, pattern_key, pattern_value, 0.5,
+          format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+        )
+      )
+    }
+  }, error = function(e) message("pattern learning failed: ", conditionMessage(e)))
+  invisible(NULL)
+}
+
+# NEW: Get active learned patterns to apply during analysis
+db_get_learned_patterns <- function(con, pattern_type = NULL, min_confidence = 0.7) {
+  if (is.null(pattern_type)) {
+    DBI::dbGetQuery(con,
+      "SELECT * FROM qa_learned_patterns 
+       WHERE is_active = 1 AND confidence_score >= ?
+       ORDER BY confidence_score DESC, occurrence_count DESC",
+      params = list(min_confidence)
+    )
+  } else {
+    DBI::dbGetQuery(con,
+      "SELECT * FROM qa_learned_patterns 
+       WHERE is_active = 1 AND pattern_type = ? AND confidence_score >= ?
+       ORDER BY confidence_score DESC, occurrence_count DESC",
+      params = list(pattern_type, min_confidence)
+    )
+  }
+}
+
+# NEW: Analyze feedback to identify false positive patterns
+db_analyze_false_positives <- function(con, limit = 50) {
+  DBI::dbGetQuery(con,
+    "SELECT i.category, i.severity, COUNT(*) as rejection_count,
+            GROUP_CONCAT(DISTINCT f.user_comment) as common_comments
+     FROM qa_feedback f
+     JOIN issues i ON f.issue_id = i.id
+     WHERE f.user_action = 'rejected'
+     GROUP BY i.category, i.severity
+     ORDER BY rejection_count DESC
+     LIMIT ?",
+    params = list(as.integer(limit))
+  )
+}

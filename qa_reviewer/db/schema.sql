@@ -78,6 +78,35 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_ts   ON audit_log(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_email);
 
+-- User feedback on findings (accept/reject/modify) for the self-learning loop.
+CREATE TABLE IF NOT EXISTS qa_feedback (
+  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+  issue_id                INTEGER,
+  review_id               INTEGER,
+  user_email              TEXT,
+  user_action             TEXT,     -- 'accepted' | 'rejected' | 'modified'
+  original_finding_json   TEXT,
+  user_corrected_finding  TEXT,
+  user_comment            TEXT,
+  created_at              TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_review ON qa_feedback(review_id);
+
+-- Aggregated patterns learned from feedback, applied to future analyses.
+CREATE TABLE IF NOT EXISTS qa_learned_patterns (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern_type      TEXT,
+  pattern_key       TEXT,
+  pattern_value     TEXT,
+  confidence_score  REAL    DEFAULT 0.5,
+  occurrence_count  INTEGER DEFAULT 1,
+  is_active         INTEGER DEFAULT 1,
+  last_updated      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_patterns_type_key ON qa_learned_patterns(pattern_type, pattern_key);
+
 -- Document version log (placeholder for future "track revisions" feature).
 CREATE TABLE IF NOT EXISTS document_versions (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
