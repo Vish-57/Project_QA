@@ -23,7 +23,9 @@ db_initialize <- function(con, schema_file) {
   stmts <- unlist(strsplit(sql, ";\\s*\\n", perl = TRUE))
   for (s in stmts) { s <- trimws(s); if (!nzchar(s)) next; tryCatch(DBI::dbExecute(con, s), error = function(e) message("DB init skipped: ", conditionMessage(e))) }
   # Migrations for databases created before these columns existed (no-op if already present)
-  for (mig in c("ALTER TABLE reviews ADD COLUMN executive_summary TEXT")) {
+  for (mig in c("ALTER TABLE reviews ADD COLUMN executive_summary TEXT",
+                "ALTER TABLE issues ADD COLUMN section TEXT",
+                "ALTER TABLE issues ADD COLUMN page TEXT")) {
     tryCatch(DBI::dbExecute(con, mig), error = function(e) NULL)
   }
   invisible(TRUE)
@@ -52,11 +54,12 @@ db_get_review <- function(con, id) {
 db_insert_issues <- function(con, review_id, issues_df) {
   if (!nrow(issues_df)) return(invisible(NULL))
   issues_df$review_id <- review_id
-  cols <- c("review_id", "category", "severity", "location", "snippet", "description", "suggestion")
+  cols <- c("review_id", "category", "severity", "location", "snippet", "description", "suggestion", "section", "page")
   for (c in cols) if (is.null(issues_df[[c]])) issues_df[[c]] <- NA_character_
   sub <- issues_df[, cols, drop = FALSE]
   sub$review_id <- as.integer(sub$review_id)
-  DBI::dbAppendTable(con, "issues", sub, row.names = FALSE)
+  for (c in setdiff(cols, "review_id")) sub[[c]] <- as.character(sub[[c]])
+  DBI::dbAppendTable(con, "issues", sub)
 }
 
 db_issues_for_review <- function(con, review_id) {

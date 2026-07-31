@@ -23,6 +23,19 @@ SEVERITY RUBRIC (use EXACTLY one of: "critical", "major", "minor"):
 - major    : meaningful issue that a reviewer would require fixed before sign-off
 - minor    : typo, style nit, small inconsistency
 
+SKIP THESE (do NOT flag as issues):
+- Double/triple spaces used for table column alignment (e.g., "Report                                 Date")
+- Stray colons in tables (e.g., "Product A : Placebo")
+- Product name punctuation differences (e.g., "Product ADouble blind" vs "Product A: Double blind")
+- Trailing spaces in product names
+- Space vs colon differences in product descriptions (e.g., "Product A  Double blind" vs "Product A: Double blind")
+- Improvement percentages in narrative when table shows only mean/SD/significance (narrative % is calculated from individual volunteer stat sheets showing direction of difference, not from summary table)
+
+STILL FLAG THESE:
+- Actual duplicate consecutive words (e.g., "Date Date", "Days Days", "Yes Yes") → grammar category
+- Misspellings (e.g., "impovement", "Witney") → spelling category
+- Inconsistent terminology (mins/minutes, hrs/hours, favour/favor) → terminology category
+
 RULES:
 - Only flag issues clearly present in the text. Do NOT speculate.
 - If you are not sure, do NOT include the issue.

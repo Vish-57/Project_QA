@@ -325,8 +325,16 @@ deterministic_findings <- function(text) {
   }
   seen_ds <- character(0)
   for (li in seq_along(lines)) {
-    ln <- lines[li]; mm <- regmatches(ln, gregexpr("[A-Za-z]+  +[A-Za-z]+", ln, perl = TRUE))[[1]]
-    for (h in mm) { if (h %in% seen_ds) next; seen_ds <- c(seen_ds, h); out[[length(out) + 1]] <- mk_issue("minor", "formatting", sprintf("text (\"%s...\")", substr(trimws(ln), 1, 40)), sprintf("Double space between words: \"%s\".", h), "Replace the double space with a single space.", h, gsub(" +", " ", h)); if (length(out) >= 120) break }
+    ln <- lines[li]
+    mm <- regmatches(ln, gregexpr("[A-Za-z]+  +[A-Za-z]+", ln, perl = TRUE))[[1]]
+    if (length(mm) == 0) next
+    for (h in mm) {
+      if (h %in% seen_ds) next
+      if (grepl("^\\w+ {5,}\\w+$", h)) next
+      seen_ds <- c(seen_ds, h)
+      out[[length(out) + 1]] <- mk_issue("minor", "formatting", sprintf("text (\"%s...\")", substr(trimws(ln), 1, 40)), sprintf("Double space between words: \"%s\".", h), "Replace the double space with a single space.", h, gsub(" +", " ", h))
+      if (length(out) >= 120) break
+    }
     if (length(out) >= 120) break
   }
   if (length(out) == 0) return(empty_issues())
@@ -712,8 +720,9 @@ aggregate_summary <- function(parsed, issues_df, structure_audit, compliance_aud
   n_crit <- as.integer(sev_counts["critical"]); if (is.na(n_crit)) n_crit <- 0L
   n_major <- as.integer(sev_counts["major"]); if (is.na(n_major)) n_major <- 0L
   n_minor <- as.integer(sev_counts["minor"]); if (is.na(n_minor)) n_minor <- 0L
-  score <- as.integer(max(0, 100 - n_crit*12 - n_major*4 - n_minor*1))
-  risk_level <- if (score >= 85) "Low" else if (score >= 70) "Medium" else if (score >= 50) "High" else "Critical"
+  sc <- recompute_score(issues_df)
+  score <- sc$score
+  risk_level <- sc$risk
   template <- load_prompt("executive_summary")
   prompt <- fill_prompt(template, list(DOC_TYPE = doc_type, FILENAME = parsed$filename, N_PAGES = parsed$n_pages, N_WORDS = parsed$n_words, SCORE = score, RISK = risk_level, N_CRIT = n_crit, N_MAJOR = n_major, N_MINOR = n_minor, TOP_ISSUES = format_top_issues(issues_df, n = 10), STRUCTURE = jsonlite::toJSON(structure_audit %||% list(), auto_unbox = TRUE), COMPLIANCE = jsonlite::toJSON(compliance_audit %||% list(), auto_unbox = TRUE)))
   res <- tryCatch(ollama_generate_json(prompt, model, config, system = SYSTEM_QA_REVIEWER, options = llm_options(config, low_temp = TRUE), timeout_sec = 240), error = function(e) list(ok = FALSE, data = NULL))

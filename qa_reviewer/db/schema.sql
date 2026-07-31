@@ -51,7 +51,9 @@ CREATE TABLE IF NOT EXISTS issues (
   location      TEXT,
   snippet       TEXT,
   description   TEXT,
-  suggestion    TEXT
+  suggestion    TEXT,
+  section       TEXT,
+  page          TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_issues_review ON issues(review_id);
