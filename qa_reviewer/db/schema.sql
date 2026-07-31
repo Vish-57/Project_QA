@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS reviews (
   n_critical      INTEGER DEFAULT 0,
   n_major         INTEGER DEFAULT 0,
   n_minor         INTEGER DEFAULT 0,
+  executive_summary TEXT,
   error           TEXT
 );
 
@@ -55,6 +56,12 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE INDEX IF NOT EXISTS idx_issues_review ON issues(review_id);
 CREATE INDEX IF NOT EXISTS idx_issues_sev    ON issues(severity);
+
+-- Simple key/value store for app settings (custom audit guidelines, etc.).
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 
 -- Append-only audit log for SOC/QA traceability.
 CREATE TABLE IF NOT EXISTS audit_log (

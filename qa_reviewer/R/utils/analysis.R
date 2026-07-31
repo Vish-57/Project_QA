@@ -223,7 +223,7 @@ ollama_fix_json <- function(broken_text, model, config, timeout_sec = 180) {
   b$response %||% NULL
 }
 
-ollama_review <- function(text, model, config, doc_type, custom_guidelines = "", fast = FALSE, timeout_sec = 600) {
+build_review_request <- function(text, model, config, doc_type, custom_guidelines = "", fast = FALSE, timeout_sec = 600) {
   is_cloud <- grepl("-cloud$", model)
   trim_max <- if (is_cloud) 600000L else if (isTRUE(fast)) 12000L else 24000L
   if (nchar(text) > trim_max) {
@@ -244,7 +244,10 @@ ollama_review <- function(text, model, config, doc_type, custom_guidelines = "",
   ctx_cap <- if (is_cloud) 131072L else if (isTRUE(fast)) 4096L else 8192L
   num_ctx_val <- min(ctx_raw, ctx_cap)
   body <- list(model = model, system = system_msg, prompt = full_prompt, stream = FALSE, format = "json", keep_alive = "1h", options = list(temperature = 0.1, num_ctx = num_ctx_val, num_predict = out_budget, num_batch = 512L, f16_kv = TRUE))
-  resp <- httr2::request(paste0(ollama_base_url(config), "/api/generate")) |> httr2::req_method("POST") |> httr2::req_body_json(body, auto_unbox = TRUE) |> httr2::req_timeout(timeout_sec) |> httr2::req_perform()
+  httr2::request(paste0(ollama_base_url(config), "/api/generate")) |> httr2::req_method("POST") |> httr2::req_body_json(body, auto_unbox = TRUE) |> httr2::req_timeout(timeout_sec)
+}
+
+process_review_response <- function(resp, model, config) {
   parsed <- httr2::resp_body_json(resp)
   raw <- parsed$response %||% ""
   cleaned <- clean_json_text(raw)
@@ -260,6 +263,11 @@ ollama_review <- function(text, model, config, doc_type, custom_guidelines = "",
   eval_count <- parsed$eval_count %||% 0
   tps <- if (eval_duration > 0) round(eval_count / eval_duration, 1) else 0
   list(ok = !is.null(out), data = out, raw_text = raw, cleaned_text = cleaned, elapsed_s = total_duration, repaired = was_repaired, stats = list(total_s = total_duration, load_s = load_duration, prompt_eval_s = prompt_eval_t, eval_s = eval_duration, eval_count = eval_count, tps = tps))
+}
+
+ollama_review <- function(text, model, config, doc_type, custom_guidelines = "", fast = FALSE, timeout_sec = 600) {
+  resp <- httr2::req_perform(build_review_request(text, model, config, doc_type, custom_guidelines = custom_guidelines, fast = fast, timeout_sec = timeout_sec))
+  process_review_response(resp, model, config)
 }
 
 deterministic_findings <- function(text) {
@@ -353,13 +361,21 @@ build_table_contexts <- function(text, before = 30L, after = 30L, max_chars = 11
   out[nzchar(trimws(out))]
 }
 
-ollama_verify_numbers <- function(chunk, model, config, timeout_sec = 600) {
+build_verify_request <- function(chunk, model, config, timeout_sec = 600) {
   system_msg <- "You are a meticulous data-verification auditor at Mascot Spincontrol Pvt. Ltd. You compare narrative claims against table cells and report only real, provable mismatches."
   prompt <- paste0("Below is an extract of a clinical/cosmetic study report: narrative text plus tables.\nTables are pipe-delimited rows between [TABLE n] and [END TABLE n]. The first row(s) hold the column headers (timepoints such as 'T+30 mins', '8 Hours', 'T+14 days', 'T+28 Days'). A value's column is determined by its position in the row, counting the pipes.\n\nYOUR ONLY TASK: verify every number in the narrative against the tables. For EACH sentence that quotes a figure:\n1. Locate the table and the exact row it refers to.\n2. Count pipe positions to identify which COLUMN (timepoint) the figure sits in.\n3. Compare the value AND the timepoint AND the row label with what the sentence says.\n\nReport an issue for every one of these:\n- VALUE MISMATCH: narrative figure differs from the table cell (e.g. table cell is 68% but the text says 71%).\n- TIMEPOINT MISMATCH: the figure exists but in a different column than stated (e.g. 88% sits in the '8 Hours' column but the text says 'at T+30 minutes').\n- ROW/ITEM MISMATCH: the figure belongs to a different question/parameter than the one named.\n- NOT IN TABLE: a quoted figure appears nowhere in the referenced table.\n- SIGNIFICANCE CONTRADICTION: 'significant' claimed but the p-value or 'Significant at 5%' cell says otherwise (or vice versa).\n- COUNT MISMATCH: N / number of subjects differs between text and table.\n- LABEL MISMATCH: the table's own caption/parameter name disagrees with the section heading or the narrative parameter.\n\nRules: quote BOTH values in what_is_wrong (what the table shows vs what the text says). Only report a mismatch you can prove from the extract. If everything agrees, return an empty issues array. Do not report spelling, grammar or formatting. Return ONLY valid JSON.\n\n{\n  \"issues\": [\n    {\n      \"severity\": \"critical|major|minor\",\n      \"category\": \"statistics|inconsistency\",\n      \"location\": \"<section / table number and row>\",\n      \"what_is_wrong\": \"<table shows X at <column>, but the text states Y at <column>>\",\n      \"suggested_fix\": \"<the corrected sentence or value>\",\n      \"original_text\": \"<verbatim phrase from the narrative that is wrong, or empty>\",\n      \"corrected_text\": \"<the corrected phrase, or empty>\"\n    }\n  ]\n}\n\nEXTRACT TO VERIFY:\n\"\"\"\n", chunk, "\n\"\"\"\n")
-  body <- list(model = model, system = system_msg, prompt = prompt, stream = FALSE, format = "json", keep_alive = "1h", options = list(temperature = 0, num_ctx = 32768L, num_predict = 3072L))
-  resp <- tryCatch(httr2::request(paste0(ollama_base_url(config), "/api/generate")) |> httr2::req_method("POST") |> httr2::req_body_json(body, auto_unbox = TRUE) |> httr2::req_timeout(timeout_sec) |> httr2::req_perform(), error = function(e) NULL)
-  if (is.null(resp)) return(empty_issues())
+  is_cloud <- grepl("-cloud$", model)
+  num_ctx_val <- if (is_cloud) 32768L else {
+    est <- ceiling(nchar(prompt) / 4) + 3072L + 512L
+    max(8192L, min(32768L, as.integer(2^ceiling(log2(est)))))
+  }
+  body <- list(model = model, system = system_msg, prompt = prompt, stream = FALSE, format = "json", keep_alive = "1h", options = list(temperature = 0, num_ctx = num_ctx_val, num_predict = 3072L, num_batch = 512L))
+  httr2::request(paste0(ollama_base_url(config), "/api/generate")) |> httr2::req_method("POST") |> httr2::req_body_json(body, auto_unbox = TRUE) |> httr2::req_timeout(timeout_sec)
+}
+
+parse_verify_response <- function(resp) {
   parsed <- tryCatch(httr2::resp_body_json(resp), error = function(e) NULL)
+  if (is.null(parsed)) return(empty_issues())
   raw <- parsed$response %||% ""; out <- parse_model_json(raw)
   if (is.null(out)) return(empty_issues())
   iss <- out$issues
@@ -367,25 +383,36 @@ ollama_verify_numbers <- function(chunk, model, config, timeout_sec = 600) {
   coerce_issues_df(normalize_review(list(issues = iss))$issues)
 }
 
+ollama_verify_numbers <- function(chunk, model, config, timeout_sec = 600) {
+  resp <- tryCatch(httr2::req_perform(build_verify_request(chunk, model, config, timeout_sec)), error = function(e) NULL)
+  if (is.null(resp)) return(empty_issues())
+  parse_verify_response(resp)
+}
+
 numeric_verification_pass <- function(text, model, config, progress = function(msg) invisible(NULL)) {
   chunks <- build_table_contexts(text)
   if (length(chunks) == 0) return(empty_issues())
   N <- length(chunks)
-  workers <- min(config$analysis$workers %||% 2L, N)
-  one_verify <- function(i) {
-    if (is.function(progress)) progress(sprintf("Verifying figures against tables (%d/%d) ...", i, N))
+  acc <- list()
+  if (N > 1L) {
+    progress(sprintf("Verifying figures against tables (%d sections, parallel) ...", N))
+    reqs <- lapply(chunks, build_verify_request, model = model, config = config)
+    resps <- tryCatch(httr2::req_perform_parallel(reqs, on_error = "continue", progress = FALSE, max_active = min(config$analysis$parallel_requests %||% 6L, N)), error = function(e) NULL)
+    if (!is.null(resps)) {
+      for (rp in resps) {
+        if (!inherits(rp, "httr2_response")) next
+        r <- tryCatch(parse_verify_response(rp), error = function(e) NULL)
+        if (!is.null(r) && NROW(r) > 0) acc[[length(acc) + 1]] <- r
+      }
+      if (length(acc) == 0) return(empty_issues())
+      return(dedupe_issues(do.call(rbind, acc)))
+    }
+  }
+  for (i in seq_len(N)) {
+    progress(sprintf("Verifying figures against tables (%d/%d) ...", i, N))
     r <- tryCatch(ollama_verify_numbers(chunks[[i]], model, config), error = function(e) NULL)
-    if (!is.null(r) && NROW(r) > 0) r else NULL
+    if (!is.null(r) && NROW(r) > 0) acc[[length(acc) + 1]] <- r
   }
-  results <- if (workers <= 1L) {
-    lapply(seq_len(N), one_verify)
-  } else {
-    ok <- tryCatch({ future::plan(future::multisession, workers = workers); TRUE }, error = function(e) FALSE)
-    on.exit(future::plan(future::sequential), add = TRUE)
-    if (ok) future.apply::future_lapply(seq_len(N), one_verify, future.seed = TRUE, future.packages = c("httr2", "jsonlite"))
-    else lapply(seq_len(N), one_verify)
-  }
-  acc <- Filter(Negate(is.null), results)
   if (length(acc) == 0) return(empty_issues())
   dedupe_issues(do.call(rbind, acc))
 }
@@ -506,7 +533,16 @@ assign_pages <- function(issues, text, page_texts = NULL, toc_map = NULL) {
 }
 
 run_audit <- function(text, model, config, doc_type, custom_guidelines = "", fast = FALSE, deep = FALSE, page_texts = NULL, toc_map = NULL, verify_numbers = TRUE, progress = function(msg) invisible(NULL)) {
-  t0 <- Sys.time(); repaired <- FALSE
+  t0 <- Sys.time(); repaired <- FALSE; verify_done <- FALSE; data <- NULL
+  cache_dir <- config$cache$dir %||% "cache"
+  run_key <- digest::digest(list("run_audit_v3", text, model, doc_type, custom_guidelines, fast, deep, verify_numbers), algo = "sha256")
+  cached <- tryCatch(cache_get(run_key, cache_dir), error = function(e) NULL)
+  if (!is.null(cached) && isTRUE(cached$ok)) {
+    progress("Identical document + settings analysed before - returning cached result instantly.")
+    cached$elapsed_s <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    cached$from_cache <- TRUE
+    return(cached)
+  }
   if (isTRUE(deep) && !isTRUE(fast)) {
     chunks <- split_into_sections(text)
     N <- length(chunks)
@@ -537,11 +573,37 @@ run_audit <- function(text, model, config, doc_type, custom_guidelines = "", fas
     data <- list(overall_score = 0L, risk_level = "Unknown", executive_summary = exec_sum, issues = merged_llm, missing_information = as.list(missing_all))
     if (is.null(merged_llm) && !nzchar(exec_sum)) return(list(ok = FALSE, raw_text = "Deep scan produced no parseable output.", elapsed_s = as.numeric(difftime(Sys.time(), t0, units = "secs")), repaired = repaired))
   } else {
-    r <- ollama_review(text, model, config, doc_type, custom_guidelines = custom_guidelines, fast = fast)
-    if (!isTRUE(r$ok)) return(r)
-    data <- r$data; repaired <- isTRUE(r$repaired)
+    v_chunks <- if (isTRUE(verify_numbers) && !isTRUE(fast)) build_table_contexts(text) else character(0)
+    if (length(v_chunks) > 0) {
+      progress(sprintf("Running document review + %d table-verification calls in parallel ...", length(v_chunks)))
+      reqs <- c(list(build_review_request(text, model, config, doc_type, custom_guidelines = custom_guidelines, fast = fast)),
+                lapply(v_chunks, build_verify_request, model = model, config = config))
+      resps <- tryCatch(httr2::req_perform_parallel(reqs, on_error = "continue", progress = FALSE, max_active = min(config$analysis$parallel_requests %||% 6L, length(reqs))), error = function(e) NULL)
+      if (!is.null(resps) && inherits(resps[[1]], "httr2_response")) {
+        r <- process_review_response(resps[[1]], model, config)
+        if (!isTRUE(r$ok)) return(r)
+        data <- r$data; repaired <- isTRUE(r$repaired)
+        acc <- list()
+        for (rp in resps[-1]) {
+          if (!inherits(rp, "httr2_response")) next
+          vr <- tryCatch(parse_verify_response(rp), error = function(e) NULL)
+          if (!is.null(vr) && NROW(vr) > 0) acc[[length(acc) + 1]] <- vr
+        }
+        if (length(acc) > 0) {
+          num <- dedupe_issues(do.call(rbind, acc))
+          data$issues <- dedupe_issues(rbind(coerce_issues_df(data$issues), coerce_issues_df(num)))
+        }
+        verify_done <- TRUE
+      }
+    }
+    if (is.null(data)) {
+      progress("Running document review ...")
+      r <- ollama_review(text, model, config, doc_type, custom_guidelines = custom_guidelines, fast = fast)
+      if (!isTRUE(r$ok)) return(r)
+      data <- r$data; repaired <- isTRUE(r$repaired)
+    }
   }
-  if (isTRUE(verify_numbers) && !isTRUE(fast)) {
+  if (isTRUE(verify_numbers) && !isTRUE(fast) && !isTRUE(verify_done)) {
     num <- tryCatch(numeric_verification_pass(text, model, config, progress), error = function(e) NULL)
     if (!is.null(num) && NROW(num) > 0) data$issues <- dedupe_issues(rbind(coerce_issues_df(data$issues), coerce_issues_df(num)))
   }
@@ -555,7 +617,9 @@ run_audit <- function(text, model, config, doc_type, custom_guidelines = "", fas
     data$issues <- tryCatch(assign_pages(data$issues, text, page_texts, toc_map), error = function(e) data$issues)
     data$issues <- tryCatch(assign_sections(data$issues, text, toc_map), error = function(e) data$issues)
   }
-  list(ok = TRUE, data = data, elapsed_s = as.numeric(difftime(Sys.time(), t0, units = "secs")), repaired = repaired)
+  res <- list(ok = TRUE, data = data, elapsed_s = as.numeric(difftime(Sys.time(), t0, units = "secs")), repaired = repaired)
+  tryCatch(cache_put(run_key, res, cache_dir), error = function(e) NULL)
+  res
 }
 
 run_qa_analysis <- function(parsed, model, config, doc_type = "Other", progress = NULL) {

@@ -18,7 +18,17 @@ cache_get <- function(key, cache_dir, ttl_hours = 24L * 30L) {
   age_h <- as.numeric(difftime(Sys.time(), file.info(p)$mtime, units = "hours"))
   if (age_h > ttl_hours) { try(file.remove(p), silent = TRUE); return(NULL) }
   val <- tryCatch(readRDS(p), error = function(e) NULL)
-  if (!is.null(val)) .mem_cache[[key]] <- val
+  if (!is.null(val)) {
+    if (!(key %in% .mem_cache_keys)) {
+      if (length(.mem_cache_keys) >= .mem_cache_max) {
+        old <- .mem_cache_keys[1L]
+        if (exists(old, envir = .mem_cache, inherits = FALSE)) rm(list = old, envir = .mem_cache)
+        .mem_cache_keys <<- .mem_cache_keys[-1L]
+      }
+      .mem_cache_keys <<- c(.mem_cache_keys, key)
+    }
+    .mem_cache[[key]] <- val
+  }
   val
 }
 

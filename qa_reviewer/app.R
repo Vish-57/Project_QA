@@ -90,7 +90,7 @@ server <- function(input, output, session) {
                 uiOutput("model_ui"),
                 textAreaInput("remarks", "Auditor Notes", rows = 2, placeholder = "e.g. Focus on statistics section."),
                 uiOutput("eta_box"),
-                actionButton("analyze", "Run Analysis", class = "btn-primary", style = "width:100%; font-weight:600; padding:10px;"),
+                uiOutput("analyze_btn"),
                 br(), br(),
                 uiOutput("status")
               )
@@ -116,6 +116,19 @@ server <- function(input, output, session) {
           div(class = "card",
             div(class = "card-header", icon("chart-line"), " Learning & Insights"),
             uiOutput("insights_ui")
+          )
+        ),
+        tabPanel(icon("clipboard-list"), " Audit Guidelines",
+          div(class = "card",
+            div(class = "card-header", icon("clipboard-check"), " Custom Audit Guidelines"),
+            p("Add your house rules one at a time. Every saved rule is enforced on every audit, in addition to the standard checks.", style = "color:#64748b; margin-bottom:16px;"),
+            fluidRow(
+              column(10, textAreaInput("new_guideline", NULL, value = "", rows = 2, width = "100%", placeholder = "e.g. In footer, Protocol sections must show PR, ICF must show AC, SSE must show MQ.")),
+              column(2, actionButton("add_guideline", "Add rule", icon = icon("plus"), class = "btn-success", style = "width:100%; font-weight:600; margin-top:2px;"))
+            ),
+            hr(),
+            h5("Saved rules", style = "font-weight:600; margin-bottom:12px;"),
+            uiOutput("guidelines_list")
           )
         ),
         tabPanel(icon("gear"), " Settings",
@@ -187,6 +200,12 @@ server <- function(input, output, session) {
     div(style = paste("padding:8px; border-radius:6px; font-size:0.85rem;", if (up) "background:#dcfce7; color:#166534;" else "background:#fee2e2; color:#991b1b;"), if (up) "Ollama is running." else "Ollama is not reachable.")
   })
 
+  # Pre-load the selected local model into memory so the first analysis
+  # doesn't pay the model-load cost. No-op for cloud models.
+  observeEvent(input$model, {
+    if (!is.null(input$model) && input$model != "(no models installed)") ollama_warmup_async(input$model, APP_CONFIG)
+  })
+
   observeEvent(input$clear_cache, {
     n <- cache_clear(APP_CONFIG$cache$dir %||% "cache")
     showNotification(paste("Cleared", n, "cache entries."), type = "message")
@@ -196,11 +215,15 @@ server <- function(input, output, session) {
   observeEvent(input$file, {
     f <- input$file; req(f)
     ext <- tolower(tools::file_ext(f$name))
-    txt <- tryCatch(read_doc(f$datapath, ext), error = function(e) { showNotification(paste("Could not read file:", conditionMessage(e)), type = "error", duration = 10); NULL })
+    pp <- NULL
+    txt <- tryCatch({
+      if (ext == "pdf") { pp <- pdftools::pdf_text(f$datapath); paste(pp, collapse = "\n\n") }
+      else read_doc(f$datapath, ext)
+    }, error = function(e) { showNotification(paste("Could not read file:", conditionMessage(e)), type = "error", duration = 10); NULL })
     if (!is.null(txt)) {
       doc_text(txt); analysis(NULL)
       if (ext == "docx") { orig_docx_path(f$datapath); orig_docx_name(f$name); tm <- tryCatch(parse_toc_pages(paste(docx_paragraph_texts(f$datapath), collapse = "\n")), error = function(e) NULL); toc_map(tm); pdf_pages(NULL) }
-      else { orig_docx_path(NULL); orig_docx_name(NULL); toc_map(NULL); if (ext == "pdf") { pp <- tryCatch(pdftools::pdf_text(f$datapath), error = function(e) NULL); pdf_pages(pp) } else { pdf_pages(NULL) } }
+      else { orig_docx_path(NULL); orig_docx_name(NULL); toc_map(NULL); pdf_pages(pp) }
       showNotification(sprintf("Loaded '%s' (%s chars, %s words)", f$name, format(nchar(txt), big.mark = ","), format(max(0L, { m <- gregexpr("\\S+", txt, perl = TRUE)[[1]]; if (m[1] == -1) 0L else length(m) }), big.mark = ",")), type = "message")
     }
   })
@@ -208,7 +231,7 @@ server <- function(input, output, session) {
   output$eta_box <- renderUI({
     txt <- doc_text(); m <- input$model
     if (is.null(txt) || is.null(m) || m == "(no models installed)") return(NULL)
-    est_sec <- max(30, ceiling(nchar(txt) / 200))
+    est_sec <- max(30, ceiling(nchar(txt) / 350))
     div(style = "background:#f0fdf4; border-left:3px solid #22c55e; padding:8px 10px; border-radius:6px; margin-bottom:10px; font-size:0.85rem;", tags$strong("Est. time: "), sprintf("~%d min %d sec", est_sec %/% 60, est_sec %% 60))
   })
 
@@ -219,17 +242,83 @@ server <- function(input, output, session) {
         h5(style = "margin:0; font-weight:600;", icon("spinner", class = "fa-pulse"), " Analysing..."),
         span(input$model, style = "font-size:0.8rem; color:#64748b;")
       ),
-      div(class = "progress-anim", div()),
+      div(class = "progress-anim", div(style = sprintf("animation-duration:%ds;", max(30L, ceiling(nchar(doc_text() %||% "") / 200))))),
       p("Processing document chunks with LLM...", style = "color:#64748b; font-size:0.8rem; margin-top:6px;")
     )
   })
 
+  # --- Audit Guidelines (persistent house rules, enforced on every audit) ---
+  # Stored as a JSON array under the "guidelines_list" setting. Rules are sent
+  # to the model with their own numbering, so strip any "1." / "2)" the user
+  # typed at the start to avoid "1. 1. ..." duplication.
+  clean_rule <- function(s) trimws(sub("^\\s*\\d+\\s*[.)]\\s*", "", s))
+
+  load_guidelines <- function() {
+    raw <- db_get_setting(DB, "guidelines_list", "")
+    if (!nzchar(raw)) return(character(0))
+    g <- tryCatch(as.character(unlist(jsonlite::fromJSON(raw))), error = function(e) character(0))
+    g[nzchar(trimws(g))]
+  }
+  guidelines <- reactiveVal(load_guidelines())
+
+  persist_guidelines <- function(g) {
+    db_save_setting(DB, "guidelines_list", as.character(jsonlite::toJSON(g)))
+    guidelines(g)
+  }
+
+  observeEvent(input$add_guideline, {
+    txt <- clean_rule(input$new_guideline %||% "")
+    if (!nzchar(txt)) { showNotification("Type a rule first.", type = "warning"); return(NULL) }
+    if (length(guidelines()) >= 50L) { showNotification("Rule limit reached (50). Remove a rule first.", type = "warning"); return(NULL) }
+    persist_guidelines(c(guidelines(), txt))
+    updateTextAreaInput(session, "new_guideline", value = "")
+    showNotification("Rule saved.", type = "message")
+  })
+
+  # One delete button per rule (del_rule_1 ... del_rule_50). Observers are
+  # registered once for a fixed set of slots, so re-rendering the list can
+  # never stack duplicate handlers on the same button.
+  lapply(seq_len(50L), function(i) {
+    observeEvent(input[[paste0("del_rule_", i)]], {
+      cur <- guidelines()
+      if (i <= length(cur)) { persist_guidelines(cur[-i]); showNotification("Rule removed.", type = "warning") }
+    }, ignoreInit = TRUE)
+  })
+
+  output$guidelines_list <- renderUI({
+    g <- guidelines()
+    if (length(g) == 0) return(p(em("No custom rules yet. Add one above."), style = "color:#94a3b8;"))
+    tagList(lapply(seq_along(g), function(i) {
+      div(style = "display:flex; align-items:flex-start; gap:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; margin-bottom:8px; background:#f8fafc;",
+        div(style = "flex:0 0 28px; height:28px; border-radius:8px; background:#1e293b; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85em;", i),
+        div(style = "flex:1; line-height:1.45; color:#1e293b;", g[i]),
+        actionButton(paste0("del_rule_", i), NULL, icon = icon("trash"), class = "btn-danger btn-sm", style = "flex:0 0 auto;")
+      )
+    }))
+  })
+
   # --- Analysis ---
+  output$analyze_btn <- renderUI({
+    if (isTRUE(running())) {
+      tags$button(type = "button", class = "btn btn-primary", disabled = "disabled", style = "width:100%; font-weight:600; padding:10px; opacity:0.65;", icon("spinner", class = "fa-pulse"), " Analysing...")
+    } else {
+      actionButton("analyze", "Run Analysis", class = "btn-primary", style = "width:100%; font-weight:600; padding:10px;")
+    }
+  })
+
   observeEvent(input$analyze, {
+    if (isTRUE(running())) return(NULL)
     txt <- doc_text(); req(txt)
     if (is.null(input$model) || input$model == "(no models installed)") { showNotification("Select an Ollama model first.", type = "warning"); return(NULL) }
     running(TRUE); analysis(NULL)
-    .text <- txt; .model <- input$model; .doctype <- input$doc_type; .remarks <- input$remarks %||% ""
+    # Saved house rules (numbered) + optional one-off remarks for this run.
+    g <- guidelines()
+    rules_txt <- if (length(g) > 0) paste(sprintf("%d. %s", seq_along(g), g), collapse = "\n") else ""
+    remarks_txt <- trimws(input$remarks %||% "")
+    parts <- character(0)
+    if (nzchar(rules_txt)) parts <- c(parts, rules_txt)
+    if (nzchar(remarks_txt)) parts <- c(parts, paste0("REMARKS FOR THIS AUDIT (consider these before auditing):\n", remarks_txt))
+    .text <- txt; .model <- input$model; .doctype <- input$doc_type; .remarks <- paste(parts, collapse = "\n\n---\n\n")
     .pdf_pages <- pdf_pages(); .toc_map <- toc_map(); .study_code <- input$study_code %||% "UNKNOWN"
     .user_email <- if (!is.null(current_user())) current_user()$email else "anonymous"
     .filename <- if (!is.null(input$file)) input$file$name else "unknown"
@@ -256,6 +345,7 @@ server <- function(input, output, session) {
                 duration_s = round(res$elapsed_s, 1),
                 overall_score = res$data$overall_score %||% 0,
                 risk_level = res$data$risk_level %||% "Unknown",
+                executive_summary = res$data$executive_summary %||% "",
                 n_critical = sum(tolower(res$data$issues$severity) == "critical", na.rm = TRUE),
                 n_major = sum(tolower(res$data$issues$severity) == "major", na.rm = TRUE),
                 n_minor = sum(tolower(res$data$issues$severity) == "minor", na.rm = TRUE)
@@ -270,8 +360,9 @@ server <- function(input, output, session) {
           }
           analysis(res)
           history_trigger(history_trigger() + 1)
-        } else if (!is.null(res)) {
-          analysis(res)
+        } else {
+          if (!is.null(review_id)) tryCatch(db_update_review(DB, review_id, list(status = "error", finished_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"))), error = function(e) NULL)
+          if (!is.null(res)) analysis(res)
         }
       }, error = function(e) message("analysis error: ", conditionMessage(e)))
       running(FALSE)
@@ -290,7 +381,7 @@ server <- function(input, output, session) {
     n_minor <- sum(tolower(d$issues$severity) == "minor", na.rm = TRUE)
 
     model_label <- d$model %||% ""
-    dur_label <- if (length(a$elapsed_s) && is.numeric(a$elapsed_s) && a$elapsed_s > 0) sprintf("%.0f sec", a$elapsed_s) else ""
+    dur_label <- if (isTRUE(a$from_cache)) "instant (cached)" else if (length(a$elapsed_s) && is.numeric(a$elapsed_s) && a$elapsed_s > 0) sprintf("%.0f sec", a$elapsed_s) else ""
     tagList(
       div(class = "card",
         div(class = "card-header", icon("gauge-high"), " Score Overview"),
@@ -349,17 +440,19 @@ server <- function(input, output, session) {
   )
 
   # --- History ---
-  observeEvent(analysis(), { history_trigger(history_trigger() + 1) }, ignoreNULL = TRUE)
+  history_df <- reactiveVal(data.frame())
 
   output$history_table <- DT::renderDT({
     history_trigger()
     df <- db_list_reviews(DB, limit = 200)
+    history_df(df)
     if (nrow(df) == 0) return(DT::datatable(data.frame(Message = "No reviews yet."), options = list(dom = "t")))
-    dur <- if (is.numeric(df$duration_s)) sprintf("%.0fs", df$duration_s) else "-"
+    nz <- function(v) ifelse(is.na(v), 0, v)
+    dur <- ifelse(is.na(df$duration_s), "-", sprintf("%.0fs", nz(df$duration_s)))
     show <- data.frame(
       ID = df$id, File = df$filename, Type = df$doc_type, Model = df$model,
       Score = df$overall_score, Risk = df$risk_level,
-      Issues = (df$n_critical %||% 0) + (df$n_major %||% 0) + (df$n_minor %||% 0),
+      Issues = nz(df$n_critical) + nz(df$n_major) + nz(df$n_minor),
       Duration = dur, Date = df$started_at, stringsAsFactors = FALSE
     )
     DT::datatable(show, selection = "single", options = list(pageLength = 10, dom = "ftip"), rownames = FALSE)
@@ -367,8 +460,17 @@ server <- function(input, output, session) {
 
   observeEvent(input$load_history, {
     sel <- input$history_table_rows_selected; req(sel)
-    df <- db_list_reviews(DB, limit = 200); id <- df$id[sel]
+    df <- history_df(); req(nrow(df) >= sel)
+    id <- df$id[sel]
     review <- db_get_review(DB, id); issues <- db_issues_for_review(DB, id)
+    if (NROW(issues) > 0) {
+      blank_if_na <- function(v) ifelse(is.na(v), "", as.character(v))
+      issues$what_is_wrong <- blank_if_na(issues$description)
+      issues$suggested_fix <- blank_if_na(issues$suggestion)
+      issues$location <- blank_if_na(issues$location)
+      issues$category <- blank_if_na(issues$category)
+      issues$severity <- blank_if_na(issues$severity)
+    }
     if (nrow(review) > 0) {
       analysis(list(ok = TRUE, data = list(
         overall_score = review$overall_score, risk_level = review$risk_level,
@@ -385,7 +487,8 @@ server <- function(input, output, session) {
 
   observeEvent(input$delete_history, {
     sel <- input$history_table_rows_selected; req(sel)
-    df <- db_list_reviews(DB, limit = 200); id <- df$id[sel]
+    df <- history_df(); req(nrow(df) >= sel)
+    id <- df$id[sel]
     DBI::dbExecute(DB, "DELETE FROM issues WHERE review_id = ?", params = list(id))
     DBI::dbExecute(DB, "DELETE FROM reviews WHERE id = ?", params = list(id))
     history_trigger(history_trigger() + 1)

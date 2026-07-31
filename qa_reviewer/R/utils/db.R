@@ -22,6 +22,10 @@ db_initialize <- function(con, schema_file) {
   sql <- paste(readLines(schema_file, warn = FALSE), collapse = "\n")
   stmts <- unlist(strsplit(sql, ";\\s*\\n", perl = TRUE))
   for (s in stmts) { s <- trimws(s); if (!nzchar(s)) next; tryCatch(DBI::dbExecute(con, s), error = function(e) message("DB init skipped: ", conditionMessage(e))) }
+  # Migrations for databases created before these columns existed (no-op if already present)
+  for (mig in c("ALTER TABLE reviews ADD COLUMN executive_summary TEXT")) {
+    tryCatch(DBI::dbExecute(con, mig), error = function(e) NULL)
+  }
   invisible(TRUE)
 }
 
@@ -57,6 +61,17 @@ db_insert_issues <- function(con, review_id, issues_df) {
 
 db_issues_for_review <- function(con, review_id) {
   DBI::dbGetQuery(con, "SELECT * FROM issues WHERE review_id = ? ORDER BY id ASC", params = list(review_id))
+}
+
+db_get_setting <- function(con, key, default = "") {
+  res <- tryCatch(DBI::dbGetQuery(con, "SELECT value FROM settings WHERE key = ?", params = list(key)), error = function(e) NULL)
+  if (is.null(res) || nrow(res) == 0) return(default)
+  res$value[1]
+}
+
+db_save_setting <- function(con, key, value) {
+  tryCatch(DBI::dbExecute(con, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", params = list(key, value)), error = function(e) NULL)
+  invisible(NULL)
 }
 
 db_audit <- function(con, user_email, action, target = NULL, meta = NULL) {

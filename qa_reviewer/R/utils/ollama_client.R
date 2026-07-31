@@ -88,6 +88,24 @@ ollama_embed <- function(text, model, config, timeout_sec = 60) {
   unlist(parsed$embedding %||% list(), use.names = FALSE)
 }
 
+# Fire-and-forget warm-up: asks Ollama to load the model into memory (keep_alive 1h)
+# without blocking the Shiny process. Uses the system curl binary so the request
+# keeps running in the background; silently does nothing if curl is unavailable.
+# Cloud models have no local load time, so they are skipped.
+ollama_warmup_async <- function(model, config) {
+  if (is.null(model) || !nzchar(model) || grepl("-cloud$", model)) return(invisible(NULL))
+  tryCatch({
+    curl_bin <- Sys.which("curl")
+    if (!nzchar(curl_bin)) return(invisible(NULL))
+    body <- jsonlite::toJSON(list(model = model, prompt = "Hi", stream = FALSE, keep_alive = "1h", options = list(num_predict = 1L)), auto_unbox = TRUE)
+    tf <- tempfile(fileext = ".json")
+    writeLines(as.character(body), tf)
+    sink_file <- if (.Platform$OS.type == "windows") "NUL" else "/dev/null"
+    system2(curl_bin, c("-s", "-o", sink_file, "--max-time", "300", "-X", "POST", "--data-binary", paste0("@", tf), paste0(ollama_base_url(config), "/api/generate")), wait = FALSE)
+  }, error = function(e) NULL)
+  invisible(NULL)
+}
+
 ollama_warmup <- function(model, config) {
   tryCatch({
     body <- list(model = model, prompt = "Hi", stream = FALSE, keep_alive = "1h", options = list(num_predict = 1L))

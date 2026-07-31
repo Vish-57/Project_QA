@@ -29,6 +29,11 @@ default:
     chunk_overlap: 400
     max_chunks: 40
     workers: 4
+    # Max concurrent HTTP requests to Ollama in one analysis batch.
+    # Cloud models parallelize fully; for local models also raise the
+    # OLLAMA_NUM_PARALLEL environment variable (e.g. 4) so the server
+    # actually processes requests concurrently instead of queueing them.
+    parallel_requests: 6
     temperature: 0.2
     top_p: 0.9
     num_ctx: 8192
