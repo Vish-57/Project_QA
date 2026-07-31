@@ -30,7 +30,8 @@ SKIP THESE FALSE POSITIVES:
 - Stray colons in tables, trailing spaces
 - Product name punctuation variations
 - Space vs colon in product descriptions
-- Improvement percentages in narrative when table shows mean/SD/p-values only (% derived from individual volunteer stat sheets)
+- Improvement percentages in narrative (e.g., '100% of panel presented improvement') when table shows only mean/SD/p-values — % derived from individual volunteer stat sheets (counting positive/negative direction), NOT from summary table cells
+- Any 'X% of subjects/volunteers/panel' claim that cannot be verified from mean/SD tables — logically valid from raw individual data
 
 STILL FLAG:
 - Actual duplicate consecutive words (e.g., 'Date Date', 'Days Days') → grammar

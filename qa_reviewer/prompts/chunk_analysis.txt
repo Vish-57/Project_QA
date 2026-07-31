@@ -29,7 +29,8 @@ SKIP THESE (do NOT flag as issues):
 - Product name punctuation differences (e.g., "Product ADouble blind" vs "Product A: Double blind")
 - Trailing spaces in product names
 - Space vs colon differences in product descriptions (e.g., "Product A  Double blind" vs "Product A: Double blind")
-- Improvement percentages in narrative when table shows only mean/SD/significance (narrative % is calculated from individual volunteer stat sheets showing direction of difference, not from summary table)
+- Improvement percentages in narrative (e.g., "100% of the panel presented improvement") when table shows only mean/SD/p-values — these % are calculated from individual volunteer stat sheets (counting positive/negative direction of difference), NOT from summary table cells
+- Any percentage claim about "X% of subjects/volunteers/panel" that cannot be verified from mean/SD tables — this is logically valid from raw individual data
 
 STILL FLAG THESE:
 - Actual duplicate consecutive words (e.g., "Date Date", "Days Days", "Yes Yes") → grammar category
