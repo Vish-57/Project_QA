@@ -474,11 +474,10 @@ mod_feedback_server <- function(id, con) {
       })
     })
     
-    # Initial load
-    load_feedback_stats()
-    
-    # Auto-refresh stats every 30 seconds
-    invalidateLater(30000, session)
-    load_feedback_stats()
+    # Initial load + auto-refresh stats every 30 seconds
+    observe({
+      invalidateLater(30000, session)
+      load_feedback_stats()
+    })
   })
 }
